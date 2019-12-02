@@ -4,12 +4,13 @@ import sys, os, tempfile, argparse
 
 # Parse command-line arguments:
 parser = argparse.ArgumentParser()
-parser.add_argument('--port')
-parser.add_argument('--debug', default=False, action='store_true')
+parser.add_argument('--port', help="The HTTP port to serve on")
+parser.add_argument('--debug', default=False, action='store_true', help="Print configuration and serve directories")
+
 
 mode_group = parser.add_mutually_exclusive_group()
-mode_group.add_argument('--proxy')
-mode_group.add_argument('--dir')
+mode_group.add_argument('--proxy', metavar="URL", help="(Mode) Proxy to an HTTP root URL")
+mode_group.add_argument('--dir', help="(Mode) Serve a given directory")
 
 options = parser.parse_args()
 
