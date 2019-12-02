@@ -1,13 +1,13 @@
 # zenginx
 
-`zenginx` is a zero-configuration `nginx` wrapper, to run servers in a shell.
+`zenginx` is a zero-configuration `nginx` wrapper to run command-line servers.
 
-By default, it will work as a static file server on port 8080, and serve the current working directory:
+By default, it will work as a static file server on port `8080`, and serve the current working directory:
 
 ```bash
 $ zenginx
 Listening on localhost:8080
-Started file server on /home/me/
+Starting file server on /home/me/
 ```
 
 You can specify the port to serve on and the path to mount using `--port` and `--dir`:
@@ -25,6 +25,9 @@ $ zenginx --port 3000 --proxy http://google.com
 Listening on localhost:3000
 Starting HTTP proxy to http://google.com
 ```
+
+See `zenginx --help` for more info.
+
 
 ## Installation
 
