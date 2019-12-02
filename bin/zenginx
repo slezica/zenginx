@@ -3,6 +3,7 @@ import os, tempfile, argparse
 
 # Parse command-line arguments:
 parser = argparse.ArgumentParser()
+parser.add_argument('--port', nargs=1)
 
 mode_group = parser.add_mutually_exclusive_group()
 mode_group.add_argument('--proxy', nargs=1)
@@ -13,6 +14,8 @@ args = parser.parse_args()
 if not (args.dir or args.proxy):
     args.dir = [os.getcwd()]
 
+if not (args.port):
+    args.port = [8080]
 
 # Create optional configuration sections from arguments:
 config_mode_dir = f"""
@@ -25,6 +28,11 @@ config_mode_proxy = f"""
                 proxy_pass "{args.proxy[0]}";
             }}
 """ if args.proxy is not None else ""
+
+config_general = f"""
+            listen {args.port[0]};
+            listen [::]:{args.port[0]} default ipv6only=on;
+"""
 
 tmpdir = tempfile.mkdtemp()
 
@@ -162,8 +170,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
             }}
 
             server {{
-                listen 8080;
-                listen [::]:8080 default ipv6only=on;
+                {config_general}
 
                 access_log /dev/stdout;
                 error_log /dev/stderr;
