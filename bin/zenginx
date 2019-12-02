@@ -1,37 +1,44 @@
 #!/usr/bin/env python3
-import os, tempfile, argparse
+import sys, os, tempfile, argparse
+
 
 # Parse command-line arguments:
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', nargs=1)
+parser.add_argument('--port')
+parser.add_argument('--debug', default=False, action='store_true')
 
 mode_group = parser.add_mutually_exclusive_group()
-mode_group.add_argument('--proxy', nargs=1)
-mode_group.add_argument('--dir', nargs=1)
+mode_group.add_argument('--proxy')
+mode_group.add_argument('--dir')
 
 options = parser.parse_args()
 
-if not (options.dir or options.proxy):
-    options.dir = [os.getcwd()]
-
 if not (options.port):
-    options.port = [8080]
+    options.port = 8080
+
+if not (options.dir or options.proxy):
+    options.dir = os.getcwd()
+
+if options.dir and not os.path.isabs(options.dir):
+    options.dir = os.path.join(os.getcwd(), options.dir)
+
 
 def create_config(options, tmpdir):
     config_mode_dir = f"""
-                root "{options.dir[0]}";
+                root "{options.dir}";
                 location / {{}}
     """ if options.dir is not None else ""
 
     config_mode_proxy = f"""
                 location / {{
-                    proxy_pass "{options.proxy[0]}";
+                    proxy_pass "{options.proxy}";
                 }}
     """ if options.proxy is not None else ""
 
     config_general = f"""
-                listen {options.port[0]};
-                listen [::]:{options.port[0]} default ipv6only=on;
+                autoindex {'on' if options.debug else 'off'};
+                listen {options.port};
+                listen [::]:{options.port} default ipv6only=on;
     """
 
     return f"""
@@ -181,6 +188,9 @@ def create_config(options, tmpdir):
 with tempfile.TemporaryDirectory() as tmpdir:
     config = create_config(options, tmpdir)
     config_path = tmpdir + '/nginx.conf'
+
+    if options.debug:
+        print(config)
 
     with open(config_path, 'w') as f:
         f.write(config)
