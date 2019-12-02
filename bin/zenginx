@@ -193,6 +193,14 @@ with tempfile.TemporaryDirectory() as tmpdir:
     if options.debug:
         print(config)
 
+    print(f"Listening on localhost:{options.port}")
+
+    if options.dir:
+        print(f"Serving {options.dir}")
+
+    if options.proxy:
+        print(f"Proxying requests to {options.proxy}")
+
     with open(config_path, 'w') as f:
         f.write(config)
 
