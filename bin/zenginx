@@ -26,6 +26,7 @@ if options.dir and not os.path.isabs(options.dir):
 def create_config(options, tmpdir):
     config_mode_dir = f"""
                 root "{options.dir}";
+                autoindex {'on' if options.debug else 'off'};
                 location / {{}}
     """ if options.dir is not None else ""
 
@@ -34,12 +35,6 @@ def create_config(options, tmpdir):
                     proxy_pass "{options.proxy}";
                 }}
     """ if options.proxy is not None else ""
-
-    config_general = f"""
-                autoindex {'on' if options.debug else 'off'};
-                listen {options.port};
-                listen [::]:{options.port} default ipv6only=on;
-    """
 
     return f"""
         daemon off;
@@ -172,7 +167,8 @@ def create_config(options, tmpdir):
             }}
 
             server {{
-                {config_general}
+                listen {options.port};
+                listen [::]:{options.port} default ipv6only=on;
 
                 access_log /dev/stdout;
                 error_log /dev/stderr;
