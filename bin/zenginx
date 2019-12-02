@@ -13,7 +13,7 @@ mode_group.add_argument('--dir', help="(Mode) Serve a given directory")
 
 options = parser.parse_args()
 
-if not (options.port):
+if not options.port:
     options.port = 8080
 
 if not (options.dir or options.proxy):
