@@ -9,37 +9,32 @@ mode_group = parser.add_mutually_exclusive_group()
 mode_group.add_argument('--proxy', nargs=1)
 mode_group.add_argument('--dir', nargs=1)
 
-args = parser.parse_args()
+options = parser.parse_args()
 
-if not (args.dir or args.proxy):
-    args.dir = [os.getcwd()]
+if not (options.dir or options.proxy):
+    options.dir = [os.getcwd()]
 
-if not (args.port):
-    args.port = [8080]
+if not (options.port):
+    options.port = [8080]
 
-# Create optional configuration sections from arguments:
-config_mode_dir = f"""
-            root "{args.dir[0]}";
-            location / {{}}
-""" if args.dir is not None else ""
+def create_config(options, tmpdir):
+    config_mode_dir = f"""
+                root "{options.dir[0]}";
+                location / {{}}
+    """ if options.dir is not None else ""
 
-config_mode_proxy = f"""
-            location / {{
-                proxy_pass "{args.proxy[0]}";
-            }}
-""" if args.proxy is not None else ""
+    config_mode_proxy = f"""
+                location / {{
+                    proxy_pass "{options.proxy[0]}";
+                }}
+    """ if options.proxy is not None else ""
 
-config_general = f"""
-            listen {args.port[0]};
-            listen [::]:{args.port[0]} default ipv6only=on;
-"""
+    config_general = f"""
+                listen {options.port[0]};
+                listen [::]:{options.port[0]} default ipv6only=on;
+    """
 
-tmpdir = tempfile.mkdtemp()
-
-
-# Produce the configuration and run nginx:
-with tempfile.TemporaryDirectory() as tmpdir:
-    conf = f"""
+    return f"""
         daemon off;
         error_log /dev/stderr;
 
@@ -181,8 +176,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
         }}
     """
 
-    confpath = tmpdir + '/nginx.conf'
-    with open(confpath, 'w') as f:
-        f.write(conf)
 
-    os.system(f"nginx -p {args.dir or os.getcwd()} -c {confpath}")
+# Produce the configuration and run nginx:
+with tempfile.TemporaryDirectory() as tmpdir:
+    config = create_config(options, tmpdir)
+    config_path = tmpdir + '/nginx.conf'
+
+    with open(config_path, 'w') as f:
+        f.write(config)
+
+    os.system(f"nginx -p {options.dir or os.getcwd()} -c {config_path}")
