@@ -1,42 +1,74 @@
 #!/usr/bin/env python3
-import sys, os, tempfile, argparse
-
+import os, sys, tempfile, argparse
 
 # Parse command-line arguments:
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', help="The HTTP port to serve on")
-parser.add_argument('--debug', default=False, action='store_true', help="Print configuration and serve directories")
 
 mode_group = parser.add_mutually_exclusive_group()
-mode_group.add_argument('--proxy', metavar="URL", help="(Mode) Proxy to an HTTP root URL")
-mode_group.add_argument('--dir', help="(Mode) Serve a given directory")
+mode_group.add_argument('--proxy', nargs=1)
+mode_group.add_argument('--dir', nargs=1)
 
-options = parser.parse_args()
+ssl_group = parser.add_argument_group("SSL")
+ssl_group.add_argument('--cert', nargs=1)
+ssl_group.add_argument('--key', nargs=1)
 
-if not options.port:
-    options.port = 8080
+parser.add_argument('--port', nargs=1, type=int)
+parser.add_argument('--name', nargs=1)
 
-if not (options.dir or options.proxy):
-    options.dir = os.getcwd()
+args = parser.parse_args()
 
-if options.dir and not os.path.isabs(options.dir):
-    options.dir = os.path.join(os.getcwd(), options.dir)
+# Default mode: serve current working directory:
+if not (args.dir or args.proxy):
+    args.dir = [os.getcwd()]
 
+# Detect whether to use HTTPs, and validate cert and key are both given:
+if (args.cert is None) != (args.key is None):
+    parser.error("SSL --cert and --key must be given together")
+    sys.exit(1)
 
-def create_config(options, tmpdir):
-    config_mode_dir = f"""
-                root "{options.dir}";
-                autoindex {'on' if options.debug else 'off'};
-                location / {{}}
-    """ if options.dir is not None else ""
+use_https = args.cert is not None
 
-    config_mode_proxy = f"""
-                location / {{
-                    proxy_pass "{options.proxy}";
-                }}
-    """ if options.proxy is not None else ""
+if use_https:
+    cert = args.cert[0]
+    key = args.key[0]
 
-    return f"""
+# Decide on port, whether via option or defaulting according to protocol:
+port = args.port[0] if args.port is not None else 4430 if use_https else 8000
+
+# Create optional configuration sections from arguments:
+config_mode_dir = f"""
+            root "{args.dir[0]}";
+            location / {{}}
+""" if args.dir is not None else ""
+
+config_mode_proxy = f"""
+            location / {{
+                proxy_pass "{args.proxy[0]}";
+                proxy_pass_request_headers on;
+            }}
+""" if args.proxy is not None else ""
+
+config_listen_http = f"""
+            listen {port};
+            listen [::]:{port} default ipv6only=on;
+""" if not use_https else ""
+
+config_listen_https = f"""
+            listen {port} ssl http2;
+            listen [::]:{port} ssl http2 ipv6only=on;
+            
+            ssl_certificate {cert};
+            ssl_certificate_key {key};
+            ssl_protocols TLSv1.2 TLSv1.1 TLSv1;
+""" if use_https else ""
+
+config_server_name = f"""
+            server_name {args.name[0]};
+""" if args.name is not None else ""
+
+# Produce the configuration and run nginx:
+with tempfile.TemporaryDirectory() as tmpdir:
+    conf = f"""
         daemon off;
         error_log /dev/stderr;
 
@@ -167,8 +199,9 @@ def create_config(options, tmpdir):
             }}
 
             server {{
-                listen {options.port};
-                listen [::]:{options.port} default ipv6only=on;
+                {config_server_name}
+                {config_listen_http}
+                {config_listen_https}
 
                 access_log /dev/stdout;
                 error_log /dev/stderr;
@@ -179,24 +212,8 @@ def create_config(options, tmpdir):
         }}
     """
 
+    confpath = tmpdir + '/nginx.conf'
+    with open(confpath, 'w') as f:
+        f.write(conf)
 
-# Produce the configuration and run nginx:
-with tempfile.TemporaryDirectory() as tmpdir:
-    config = create_config(options, tmpdir)
-    config_path = tmpdir + '/nginx.conf'
-
-    if options.debug:
-        print(config)
-
-    print(f"Listening on localhost:{options.port}")
-
-    if options.dir:
-        print(f"Starting file server on {options.dir}")
-
-    if options.proxy:
-        print(f"Starting HTTP proxy to {options.proxy}")
-
-    with open(config_path, 'w') as f:
-        f.write(config)
-
-    os.system(f"nginx -p {options.dir or os.getcwd()} -c {config_path}")
+    os.system(f"nginx -c {confpath}")
