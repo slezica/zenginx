@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-import os, sys, tempfile, argparse
 
+import os, sys, tempfile, argparse, re, subprocess, collections
+
+
+# --------------------------------------------------------------------------------------------------
 # Parse command-line arguments:
+
 parser = argparse.ArgumentParser()
 
 mode_group = parser.add_mutually_exclusive_group()
 mode_group.add_argument('--proxy', nargs=1)
-mode_group.add_argument('--dir', nargs=1)
+mode_group.add_argument('--root', nargs=1)
 
 ssl_group = parser.add_argument_group("SSL")
 ssl_group.add_argument('--cert', nargs=1)
@@ -17,76 +21,187 @@ parser.add_argument('--name', nargs=1)
 
 args = parser.parse_args()
 
-# Default mode: serve current working directory:
-if not (args.dir or args.proxy):
-    args.dir = [os.getcwd()]
-
-# Detect whether to use HTTPs, and validate cert and key are both given:
 if (args.cert is None) != (args.key is None):
     parser.error("SSL --cert and --key must be given together")
     sys.exit(1)
 
-use_https = args.cert is not None
+if args.port:
+    port = args.port[0]
+elif args.cert:
+    port = 4330 # Default for HTTPs
+else:
+    port = 8000 # Default for HTTP
 
-if use_https:
-    cert = args.cert[0]
-    key = args.key[0]
+# Default to serving the current working directory:
+if not (args.root or args.proxy):
+    args.root = [os.getcwd()]
 
-# Decide on port, whether via option or defaulting according to protocol:
-port = args.port[0] if args.port is not None else 4430 if use_https else 8000
 
-# Create optional configuration sections from arguments:
-config_mode_dir = f"""
-            root "{args.dir[0]}";
-            location / {{}}
-""" if args.dir is not None else ""
+# --------------------------------------------------------------------------------------------------
+# Craft configuration parts:
 
-config_mode_proxy = f"""
-            location / {{
-                proxy_pass "{args.proxy[0]}";
-                proxy_pass_request_headers on;
-            }}
-""" if args.proxy is not None else ""
+parts = collections.defaultdict(lambda: '')
 
-config_listen_http = f"""
-            listen {port};
-            listen [::]:{port} default ipv6only=on;
-""" if not use_https else ""
+# Server name:
+if args.name is not None:
+    parts['name'] = f"""
+        server_name {args.name[0]};
+    """
 
-config_listen_https = f"""
-            listen {port} ssl http2;
-            listen [::]:{port} ssl http2 ipv6only=on;
-            
-            ssl_certificate {cert};
-            ssl_certificate_key {key};
-            ssl_protocols TLSv1.2 TLSv1.1 TLSv1;
-""" if use_https else ""
+# File mode configuration:
+if args.root is not None:
+    parts['root'] = f"""
+        root "{args.root[0]}";
+        location / {{}}
+    """
 
-config_server_name = f"""
-            server_name {args.name[0]};
-""" if args.name is not None else ""
+# Proxy mode configuration:
+if args.proxy is not None:
+    parts['proxy'] = f"""
+        location / {{
+            proxy_pass "{args.proxy[0]}";
+            proxy_pass_request_headers on;
+        }}
+    """
 
+# HTTP(s) configuration:
+if args.cert is None:
+    parts['http'] = f"""
+        listen {port};
+        listen [::]:{port} default ipv6only=on;
+    """
+else:
+    parts['https'] = f"""
+        listen {port} ssl http2;
+        listen [::]:{port} ssl http2 ipv6only=on;
+        
+        ssl_certificate {args.cert[0]};
+        ssl_certificate_key {args.key[0]};
+        ssl_protocols TLSv1.2 TLSv1.1 TLSv1;
+    """
+
+# Types, included to avoid depending on the `mime.types` file:
+parts['types'] =  """ 
+    types {{
+        text/html                                        html htm shtml;
+        text/css                                         css;
+        text/xml                                         xml;
+        image/gif                                        gif;
+        image/jpeg                                       jpeg jpg;
+        application/javascript                           js;
+        application/atom+xml                             atom;
+        application/rss+xml                              rss;
+
+        text/mathml                                      mml;
+        text/plain                                       txt;
+        text/vnd.sun.j2me.app-descriptor                 jad;
+        text/vnd.wap.wml                                 wml;
+        text/x-component                                 htc;
+
+        image/png                                        png;
+        image/svg+xml                                    svg svgz;
+        image/tiff                                       tif tiff;
+        image/vnd.wap.wbmp                               wbmp;
+        image/webp                                       webp;
+        image/x-icon                                     ico;
+        image/x-jng                                      jng;
+        image/x-ms-bmp                                   bmp;
+
+        font/woff                                        woff;
+        font/woff2                                       woff2;
+
+        application/java-archive                         jar war ear;
+        application/json                                 json;
+        application/mac-binhex40                         hqx;
+        application/msword                               doc;
+        application/pdf                                  pdf;
+        application/postscript                           ps eps ai;
+        application/rtf                                  rtf;
+        application/vnd.apple.mpegurl                    m3u8;
+        application/vnd.google-earth.kml+xml             kml;
+        application/vnd.google-earth.kmz                 kmz;
+        application/vnd.ms-excel                         xls;
+        application/vnd.ms-fontobject                    eot;
+        application/vnd.ms-powerpoint                    ppt;
+        application/vnd.oasis.opendocument.graphics      odg;
+        application/vnd.oasis.opendocument.presentation  odp;
+        application/vnd.oasis.opendocument.spreadsheet   ods;
+        application/vnd.oasis.opendocument.text          odt;
+        application/vnd.openxmlformats-officedocument.presentationml.presentation
+                                                        pptx;
+        application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+                                                        xlsx;
+        application/vnd.openxmlformats-officedocument.wordprocessingml.document
+                                                        docx;
+        application/vnd.wap.wmlc                         wmlc;
+        application/x-7z-compressed                      7z;
+        application/x-cocoa                              cco;
+        application/x-java-archive-diff                  jardiff;
+        application/x-java-jnlp-file                     jnlp;
+        application/x-makeself                           run;
+        application/x-perl                               pl pm;
+        application/x-pilot                              prc pdb;
+        application/x-rar-compressed                     rar;
+        application/x-redhat-package-manager             rpm;
+        application/x-sea                                sea;
+        application/x-shockwave-flash                    swf;
+        application/x-stuffit                            sit;
+        application/x-tcl                                tcl tk;
+        application/x-x509-ca-cert                       der pem crt;
+        application/x-xpinstall                          xpi;
+        application/xhtml+xml                            xhtml;
+        application/xspf+xml                             xspf;
+        application/zip                                  zip;
+
+        application/octet-stream                         bin exe dll;
+        application/octet-stream                         deb;
+        application/octet-stream                         dmg;
+        application/octet-stream                         iso img;
+        application/octet-stream                         msi msp msm;
+
+        audio/midi                                       mid midi kar;
+        audio/mpeg                                       mp3;
+        audio/ogg                                        ogg;
+        audio/x-m4a                                      m4a;
+        audio/x-realaudio                                ra;
+
+        video/3gpp                                       3gpp 3gp;
+        video/mp2t                                       ts;
+        video/mp4                                        mp4;
+        video/mpeg                                       mpeg mpg;
+        video/quicktime                                  mov;
+        video/webm                                       webm;
+        video/x-flv                                      flv;
+        video/x-m4v                                      m4v;
+        video/x-mng                                      mng;
+        video/x-ms-asf                                   asx asf;
+        video/x-ms-wmv                                   wmv;
+        video/x-msvideo                                  avi;
+    }}
+"""
+
+
+# --------------------------------------------------------------------------------------------------
 # Produce the configuration and run nginx:
-with tempfile.TemporaryDirectory() as tmpdir:
+
+with tempfile.TemporaryDirectory() as temp:
     conf = f"""
         daemon off;
         error_log /dev/stderr;
 
-        # The pidfile will be written to /var/run unless this is set.
-        pid {tmpdir}/nginx.pid;
-
         worker_processes 1;
+        pid {temp}/nginx.pid;
 
         events {{
             worker_connections 1024;
         }}
 
         http {{
-            client_body_temp_path {tmpdir}/client_body;
-            fastcgi_temp_path {tmpdir}/fastcgi_temp;
-            proxy_temp_path {tmpdir}/proxy_temp;
-            scgi_temp_path {tmpdir}/scgi_temp;
-            uwsgi_temp_path {tmpdir}/uwsgi_temp;
+            client_body_temp_path {temp}/client_body_temp;
+            fastcgi_temp_path {temp}/fastcgi_temp;
+            proxy_temp_path {temp}/proxy_temp;
+            scgi_temp_path {temp}/scgi_temp;
+            uwsgi_temp_path {temp}/uwsgi_temp;
 
             tcp_nopush on;
             tcp_nodelay on;
@@ -95,125 +210,30 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
             index index.html index.htm index.php;
 
-            log_format   main '$remote_addr - $remote_user [$time_local] $status '
+            log_format main '$remote_addr - $remote_user [$time_local] $status '
                 '"$request" $body_bytes_sent "$http_referer" '
                 '"$http_user_agent" "$http_x_forwarded_for"';
 
+
+            {parts['types']}
             default_type application/octet-stream;
 
-            types {{
-                text/html                                        html htm shtml;
-                text/css                                         css;
-                text/xml                                         xml;
-                image/gif                                        gif;
-                image/jpeg                                       jpeg jpg;
-                application/javascript                           js;
-                application/atom+xml                             atom;
-                application/rss+xml                              rss;
-
-                text/mathml                                      mml;
-                text/plain                                       txt;
-                text/vnd.sun.j2me.app-descriptor                 jad;
-                text/vnd.wap.wml                                 wml;
-                text/x-component                                 htc;
-
-                image/png                                        png;
-                image/svg+xml                                    svg svgz;
-                image/tiff                                       tif tiff;
-                image/vnd.wap.wbmp                               wbmp;
-                image/webp                                       webp;
-                image/x-icon                                     ico;
-                image/x-jng                                      jng;
-                image/x-ms-bmp                                   bmp;
-
-                font/woff                                        woff;
-                font/woff2                                       woff2;
-
-                application/java-archive                         jar war ear;
-                application/json                                 json;
-                application/mac-binhex40                         hqx;
-                application/msword                               doc;
-                application/pdf                                  pdf;
-                application/postscript                           ps eps ai;
-                application/rtf                                  rtf;
-                application/vnd.apple.mpegurl                    m3u8;
-                application/vnd.google-earth.kml+xml             kml;
-                application/vnd.google-earth.kmz                 kmz;
-                application/vnd.ms-excel                         xls;
-                application/vnd.ms-fontobject                    eot;
-                application/vnd.ms-powerpoint                    ppt;
-                application/vnd.oasis.opendocument.graphics      odg;
-                application/vnd.oasis.opendocument.presentation  odp;
-                application/vnd.oasis.opendocument.spreadsheet   ods;
-                application/vnd.oasis.opendocument.text          odt;
-                application/vnd.openxmlformats-officedocument.presentationml.presentation
-                                                                pptx;
-                application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-                                                                xlsx;
-                application/vnd.openxmlformats-officedocument.wordprocessingml.document
-                                                                docx;
-                application/vnd.wap.wmlc                         wmlc;
-                application/x-7z-compressed                      7z;
-                application/x-cocoa                              cco;
-                application/x-java-archive-diff                  jardiff;
-                application/x-java-jnlp-file                     jnlp;
-                application/x-makeself                           run;
-                application/x-perl                               pl pm;
-                application/x-pilot                              prc pdb;
-                application/x-rar-compressed                     rar;
-                application/x-redhat-package-manager             rpm;
-                application/x-sea                                sea;
-                application/x-shockwave-flash                    swf;
-                application/x-stuffit                            sit;
-                application/x-tcl                                tcl tk;
-                application/x-x509-ca-cert                       der pem crt;
-                application/x-xpinstall                          xpi;
-                application/xhtml+xml                            xhtml;
-                application/xspf+xml                             xspf;
-                application/zip                                  zip;
-
-                application/octet-stream                         bin exe dll;
-                application/octet-stream                         deb;
-                application/octet-stream                         dmg;
-                application/octet-stream                         iso img;
-                application/octet-stream                         msi msp msm;
-
-                audio/midi                                       mid midi kar;
-                audio/mpeg                                       mp3;
-                audio/ogg                                        ogg;
-                audio/x-m4a                                      m4a;
-                audio/x-realaudio                                ra;
-
-                video/3gpp                                       3gpp 3gp;
-                video/mp2t                                       ts;
-                video/mp4                                        mp4;
-                video/mpeg                                       mpeg mpg;
-                video/quicktime                                  mov;
-                video/webm                                       webm;
-                video/x-flv                                      flv;
-                video/x-m4v                                      m4v;
-                video/x-mng                                      mng;
-                video/x-ms-asf                                   asx asf;
-                video/x-ms-wmv                                   wmv;
-                video/x-msvideo                                  avi;
-            }}
-
             server {{
-                {config_server_name}
-                {config_listen_http}
-                {config_listen_https}
+                {parts['name']}
+                {parts['http']}
+                {parts['https']}
+
+                {parts['root']}
+                {parts['proxy']}
 
                 access_log /dev/stdout;
                 error_log /dev/stderr;
-
-                {config_mode_dir}
-                {config_mode_proxy}
             }}
         }}
     """
 
-    confpath = tmpdir + '/nginx.conf'
+    confpath = os.path.join(temp, 'nginx.conf')
     with open(confpath, 'w') as f:
         f.write(conf)
 
-    os.system(f"nginx -c {confpath}")
+    os.system(f"nginx -c '{confpath}'") # TODO subprocess run
