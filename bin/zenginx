@@ -236,4 +236,5 @@ with tempfile.TemporaryDirectory() as temp:
     with open(confpath, 'w') as f:
         f.write(conf)
 
+    print(f"Listening on port {port}")
     os.system(f"nginx -c '{confpath}'") # TODO subprocess run
