@@ -81,7 +81,7 @@ else:
     """
 
 # Types, included to avoid depending on the `mime.types` file:
-parts['types'] =  """ 
+parts['types'] =  f""" 
     types {{
         text/html                                        html htm shtml;
         text/css                                         css;
